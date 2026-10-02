@@ -1,0 +1,22 @@
+[Unit]
+Description=Read-only 3D viewer of the unified_broker_interface order engine
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/order_visualizer
+ExecStart=%h/Projects/order_visualizer/bin/order-visualizer
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=order-visualizer
+Nice=15
+CPUWeight=20
+CPUQuota=50%
+IOSchedulingClass=idle
+MemoryMax=1G
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
