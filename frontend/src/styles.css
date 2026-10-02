@@ -679,3 +679,44 @@ h3 {
 .scene-toolbar .muted {
   margin-right: 6px;
 }
+
+.navigation-toolbar {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.navigation-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.navigation-row .muted {
+  margin-right: 6px;
+}
+
+.navigation-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.navigation-hint {
+  font-size: 11px;
+  padding-left: 2px;
+}
+
+.sky-readout {
+  color: var(--ink);
+}

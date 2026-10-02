@@ -6,7 +6,25 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
+import { solarPosition } from '../utilities/solarPosition';
+import type { SunPlace } from '../utilities/solarPosition';
 import type { Theme } from '../utilities/themes';
+import { Landscape } from './landscape';
+import { SkyDome } from './skyDome';
+
+/** What a plain left-drag does: turn the view, or slide the arena along the ground. */
+export type DragMode = 'rotate' | 'pan';
+
+const DOUBLE_CLICK_ZOOM = 0.45;
+const SKY_REFRESH_SECONDS = 0.4;
+const SKY_TIME_STEP_SECONDS = 20;
+const ENVIRONMENT_REFRESH_DEGREES = 2;
+const PLAIN_EXPOSURE = 1.05;
+const DEFAULT_LIGHT_DIRECTION = new THREE.Vector3(0.4, 1, 0.5).normalize();
+
+/** Told whenever the sky moves to another time. */
+export type SkyListener = (epochSeconds: number, sun: SunPlace) => void;
+const NEAREST_DISTANCE = 3;
 
 /** A camera move in progress. */
 interface CameraFlight {
@@ -32,8 +50,28 @@ export abstract class SceneController {
   private readonly composer: EffectComposer;
   private readonly bloom: UnrealBloomPass;
   private readonly hemisphere: THREE.HemisphereLight;
-  private readonly environment: THREE.Texture;
+  private environment: THREE.Texture;
+  private readonly roomEnvironment: THREE.Texture;
+  private readonly environmentGenerator: THREE.PMREMGenerator;
+  private skyDome: SkyDome | null = null;
+  private landscape: Landscape | null = null;
+  private environmentSky: SkyDome | null = null;
+  private readonly environmentScene = new THREE.Scene();
+  private lastEnvironmentDirection: THREE.Vector3 | null = null;
+  private skyTime: number | null = null;
+  private skyListener: SkyListener | null = null;
+  private secondsSinceSkyCheck = 0;
+  private readonly lightDirection = DEFAULT_LIGHT_DIRECTION.clone();
+  private lastShadowBounds: THREE.Box3 | null = null;
+  private fogColour = new THREE.Color();
+  private groundHeight = 0;
   private flight: CameraFlight | null = null;
+  private home: {
+    position: THREE.Vector3;
+    target: THREE.Vector3;
+  } | null = null;
+  private readonly canvasElement: HTMLCanvasElement;
+  private readonly doubleClickRaycaster = new THREE.Raycaster();
   private frameRequest = 0;
   private running = false;
   private previousTime = 0;
@@ -54,16 +92,16 @@ export abstract class SceneController {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = PLAIN_EXPOSURE;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(fieldOfView, 1, 0.1, 6000);
+    this.camera = new THREE.PerspectiveCamera(fieldOfView, 1, 0.1, 40000);
 
-    const environmentGenerator = new THREE.PMREMGenerator(this.renderer);
-    this.environment = environmentGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    environmentGenerator.dispose();
+    this.environmentGenerator = new THREE.PMREMGenerator(this.renderer);
+    this.roomEnvironment = this.environmentGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.environment = this.roomEnvironment;
     this.scene.environment = this.environment;
 
     this.hemisphere = new THREE.HemisphereLight(0xffffff, 0x222233, 0.6);
@@ -90,10 +128,116 @@ export abstract class SceneController {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this.controls.zoomToCursor = true;
+    this.controls.screenSpacePanning = false;
+    this.controls.minDistance = NEAREST_DISTANCE;
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    this.controls.maxDistance = 3000;
     this.controls.addEventListener('start', this.cancelFlight);
+    this.canvasElement = canvas;
+    canvas.addEventListener('dblclick', this.handleDoubleClick);
 
     this.styleForTheme(theme);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  /**
+   * Chooses what a plain left-drag does. Shift-drag and right-drag always do the other.
+   * @param mode "rotate" to turn the view, or "pan" to slide the arena along the ground.
+   */
+  setDragMode(mode: DragMode): void {
+    if (mode === 'pan') {
+      this.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+      this.controls.touches = {
+        ONE: THREE.TOUCH.PAN,
+        TWO: THREE.TOUCH.DOLLY_ROTATE,
+      };
+    } else {
+      this.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+      this.controls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_PAN,
+      };
+    }
+  }
+
+  /**
+   * Glides the camera around the point it looks at, about the vertical axis.
+   * @param degrees How far to turn; positive turns the view to the left.
+   */
+  turnView(degrees: number): void {
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(degrees));
+    this.flyTo(target.clone().add(offset), target, 0.45);
+  }
+
+  /**
+   * Glides the camera towards or away from the point it looks at.
+   * @param factor Below 1 moves closer (0.7 is a 30% step in); above 1 moves away.
+   */
+  zoomView(factor: number): void {
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    const distance = Math.max(offset.length() * factor, NEAREST_DISTANCE);
+    offset.setLength(distance);
+    this.flyTo(target.clone().add(offset), target, 0.35);
+  }
+
+  /** Glides back to the whole-scene view the scene last fitted. */
+  fitView(): void {
+    if (this.home !== null) {
+      this.flyTo(this.home.position, this.home.target, 0.8);
+    }
+  }
+
+  /**
+   * Shows or hides the sky, sun and clouds. With the sky hidden the theme's plain background and lighting return.
+   * @param enabled Whether to show the sky.
+   */
+  setSkyEnabled(enabled: boolean): void {
+    if (enabled && this.skyDome === null) {
+      this.skyDome = new SkyDome();
+      this.scene.add(this.skyDome.sky);
+      this.landscape = new Landscape();
+      this.scene.add(this.landscape.group);
+      this.buildLandscape();
+      this.skyTime = null;
+      this.lastEnvironmentDirection = null;
+      this.secondsSinceSkyCheck = SKY_REFRESH_SECONDS;
+    } else if (!enabled && this.skyDome !== null) {
+      this.scene.remove(this.skyDome.sky);
+      this.skyDome.dispose();
+      this.skyDome = null;
+      if (this.landscape !== null) {
+        this.scene.remove(this.landscape.group);
+        this.landscape.dispose();
+        this.landscape = null;
+      }
+      this.useEnvironment(this.roomEnvironment);
+      this.lightDirection.copy(DEFAULT_LIGHT_DIRECTION);
+      this.styleForTheme(this.theme);
+      this.placeKeyLight();
+    }
+  }
+
+  /**
+   * Registers what to tell when the sky moves to another time, such as the page's readout.
+   * @param listener Called with the time and the sun's place, or null to stop.
+   */
+  setSkyListener(listener: SkyListener | null): void {
+    this.skyListener = listener;
+    if (listener !== null && this.skyTime !== null) {
+      listener(this.skyTime, solarPosition.at(this.skyTime));
+    }
   }
 
   /** Starts the animation loop. */
@@ -125,6 +269,7 @@ export abstract class SceneController {
    */
   private styleForTheme(theme: Theme): void {
     this.theme = theme;
+    this.fogColour = new THREE.Color(theme.colours.background);
     const background = new THREE.Color(theme.colours.background);
     this.scene.background = background;
     const fogNear = this.scene.fog instanceof THREE.Fog ? this.scene.fog.near : 200;
@@ -136,9 +281,136 @@ export abstract class SceneController {
     this.keyLight.intensity = theme.isLight ? 1.8 : 1.5;
     this.scene.environmentIntensity = theme.isLight ? 0.9 : 0.45;
     this.bloom.enabled = !theme.isLight;
+    this.renderer.toneMappingExposure = PLAIN_EXPOSURE;
     this.bloom.strength = 0.65;
     this.bloom.threshold = 0.78;
     this.renderer.toneMapping = theme.isLight ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
+    if (this.skyDome !== null) {
+      this.styleForSky();
+    }
+  }
+
+  /**
+   * Tells the sky where the scene's floor is, so its ground meets the floor.
+   * @param height The floor's height.
+   */
+  protected setGroundHeight(height: number): void {
+    this.groundHeight = height;
+  }
+
+  /** Builds the land, trees and mountains around the area last given to fitShadows, keeping that area flat and clear. */
+  private buildLandscape(): void {
+    if (this.landscape === null || this.lastShadowBounds === null) {
+      return;
+    }
+    const centre = this.lastShadowBounds.getCenter(new THREE.Vector3());
+    const size = this.lastShadowBounds.getSize(new THREE.Vector3());
+    this.landscape.build(this.groundHeight, new THREE.Vector2(centre.x, centre.z), Math.max(size.x, size.z) / 2);
+    if (this.skyDome !== null) {
+      const lighting = this.skyDome.lighting();
+      this.landscape.setAtmosphere(lighting.fogColour, lighting.daylight);
+    }
+  }
+
+  /**
+   * The time at the point the camera looks at, which the sky follows. Scenes whose depth is time override this.
+   * @returns The epoch time, or null when the scene has no time to show.
+   */
+  protected focusTime(): number | null {
+    return null;
+  }
+
+  /** Lights the scene from the sky: the sun's colour and strength, a dim fill, sky-coloured fog and reflections of the sky, with the bloom calmed so the bright sky does not glow. */
+  private styleForSky(): void {
+    if (this.skyDome === null) {
+      return;
+    }
+    const lighting = this.skyDome.lighting();
+    this.scene.background = null;
+    this.landscape?.setAtmosphere(lighting.fogColour, lighting.daylight);
+    this.keyLight.color.copy(lighting.keyColour);
+    this.keyLight.intensity = lighting.keyIntensity;
+    this.hemisphere.color.set(0xdfe9ff);
+    this.hemisphere.intensity = lighting.fillIntensity;
+    this.scene.environmentIntensity = lighting.environmentIntensity;
+    this.fogColour = lighting.fogColour;
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.color.copy(this.fogColour);
+    }
+    this.bloom.enabled = false;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = lighting.exposure;
+  }
+
+  /** Moves the sky to the time at the camera's focus when that time has moved far enough. */
+  private followFocusTime(): void {
+    if (this.skyDome === null) {
+      return;
+    }
+    const time = this.focusTime();
+    if (time === null) {
+      return;
+    }
+    if (this.skyTime !== null && Math.abs(time - this.skyTime) < SKY_TIME_STEP_SECONDS) {
+      return;
+    }
+    this.skyTime = time;
+    const sun = solarPosition.at(time);
+    this.skyDome.setSun(sun.elevationDegrees, sun.azimuthDegrees);
+    if (this.skyDome.isSunUp()) {
+      this.lightDirection.copy(this.skyDome.sunDirection);
+    } else {
+      this.lightDirection.copy(DEFAULT_LIGHT_DIRECTION);
+    }
+    this.styleForSky();
+    this.refreshSkyEnvironment();
+    this.placeKeyLight();
+    if (this.skyListener !== null) {
+      this.skyListener(time, sun);
+    }
+  }
+
+  /** Rebuilds the reflections from the sky, without its sun disc, when the sun has moved more than a couple of degrees. */
+  private refreshSkyEnvironment(): void {
+    if (this.skyDome === null) {
+      return;
+    }
+    const direction = this.skyDome.sunDirection;
+    if (this.lastEnvironmentDirection !== null && this.lastEnvironmentDirection.angleTo(direction) < THREE.MathUtils.degToRad(ENVIRONMENT_REFRESH_DEGREES)) {
+      return;
+    }
+    if (this.environmentSky === null) {
+      this.environmentSky = new SkyDome();
+      this.environmentSky.sky.scale.setScalar(50);
+      this.environmentSky.sky.material.uniforms.showSunDisc.value = 0;
+      this.environmentScene.add(this.environmentSky.sky);
+    }
+    this.environmentSky.sky.material.uniforms.sunPosition.value.copy(direction);
+    const texture = this.environmentGenerator.fromScene(this.environmentScene).texture;
+    this.useEnvironment(texture);
+    this.lastEnvironmentDirection = direction.clone();
+  }
+
+  /**
+   * Swaps the texture the scene reflects, freeing the previous one unless it is the studio room.
+   * @param texture The new environment.
+   */
+  private useEnvironment(texture: THREE.Texture): void {
+    if (this.environment !== this.roomEnvironment && this.environment !== texture) {
+      this.environment.dispose();
+    }
+    this.environment = texture;
+    this.scene.environment = texture;
+  }
+
+  /** Points the shadow-casting light from the current light direction at the area last given to fitShadows. */
+  private placeKeyLight(): void {
+    if (this.lastShadowBounds === null) {
+      return;
+    }
+    const sphere = this.lastShadowBounds.getBoundingSphere(new THREE.Sphere());
+    this.keyLight.target.position.copy(sphere.center);
+    this.keyLight.position.copy(sphere.center).addScaledVector(this.lightDirection, sphere.radius * 2);
   }
 
   /**
@@ -164,6 +436,7 @@ export abstract class SceneController {
     this.stop();
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.controls.removeEventListener('start', this.cancelFlight);
+    this.canvasElement.removeEventListener('dblclick', this.handleDoubleClick);
     this.disposeResources();
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.LineSegments || object instanceof THREE.Line) {
@@ -175,7 +448,18 @@ export abstract class SceneController {
       }
     });
     this.controls.dispose();
-    this.environment.dispose();
+    if (this.skyDome !== null) {
+      this.skyDome.dispose();
+    }
+    this.landscape?.dispose();
+    if (this.environmentSky !== null) {
+      this.environmentSky.dispose();
+    }
+    if (this.environment !== this.roomEnvironment) {
+      this.environment.dispose();
+    }
+    this.roomEnvironment.dispose();
+    this.environmentGenerator.dispose();
     this.composer.dispose();
     this.renderer.dispose();
   }
@@ -202,6 +486,26 @@ export abstract class SceneController {
       startedAt: this.elapsedSeconds,
       seconds,
     };
+  }
+
+  /**
+   * Remembers the whole-scene view that the Fit button returns to.
+   * @param position The camera position.
+   * @param target The point it looks at.
+   */
+  protected setHome(position: THREE.Vector3, target: THREE.Vector3): void {
+    this.home = {
+      position: position.clone(),
+      target: target.clone(),
+    };
+  }
+
+  /**
+   * The objects a double-click can land on. Subclasses list their drawn content, so handles and helpers are ignored.
+   * @returns The objects to test, searched with their children.
+   */
+  protected focusRoots(): THREE.Object3D[] {
+    return [];
   }
 
   /**
@@ -265,8 +569,8 @@ export abstract class SceneController {
     }
     distance *= tightness;
     const position = target.clone().addScaledVector(unit, distance);
-    const fogStart = this.theme.isLight ? 2.2 : 1.5;
-    this.scene.fog = new THREE.Fog(new THREE.Color(this.theme.colours.background), distance * fogStart, distance * (fogStart + 2.5));
+    const fogStart = this.theme.isLight || this.skyDome !== null ? 2.2 : 1.5;
+    this.scene.fog = new THREE.Fog(this.fogColour.clone(), distance * fogStart, distance * (fogStart + 2.5));
     return {
       position,
       target,
@@ -287,8 +591,9 @@ export abstract class SceneController {
     shadowCamera.near = 1;
     shadowCamera.far = sphere.radius * 4;
     shadowCamera.updateProjectionMatrix();
-    this.keyLight.target.position.copy(sphere.center);
-    this.keyLight.position.copy(sphere.center).add(new THREE.Vector3(0.4, 1, 0.5).normalize().multiplyScalar(sphere.radius * 2));
+    this.lastShadowBounds = bounds.clone();
+    this.placeKeyLight();
+    this.buildLandscape();
   }
 
   /**
@@ -337,8 +642,45 @@ export abstract class SceneController {
     this.advanceFlight();
     this.controls.update();
     this.update(this.elapsedSeconds, deltaSeconds);
+    if (this.skyDome !== null) {
+      this.secondsSinceSkyCheck += deltaSeconds;
+      if (this.secondsSinceSkyCheck >= SKY_REFRESH_SECONDS) {
+        this.secondsSinceSkyCheck = 0;
+        this.followFocusTime();
+      }
+      this.skyDome.update(this.elapsedSeconds, this.camera);
+      this.landscape?.update(deltaSeconds);
+    }
     this.composer.render();
     this.frameRequest = requestAnimationFrame(this.frame);
+  };
+
+  /**
+   * Glides the camera in on the spot under a double-click, keeping the current viewing angle.
+   * @param event The double-click.
+   */
+  private readonly handleDoubleClick = (event: MouseEvent): void => {
+    const box = this.canvasElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2(((event.clientX - box.left) / box.width) * 2 - 1, -((event.clientY - box.top) / box.height) * 2 + 1);
+    this.camera.updateMatrixWorld();
+    for (const root of this.focusRoots()) {
+      root.updateMatrixWorld(true);
+    }
+    this.doubleClickRaycaster.setFromCamera(pointer, this.camera);
+    const hits = this.doubleClickRaycaster.intersectObjects(this.focusRoots(), true);
+    let point: THREE.Vector3 | null = null;
+    for (const hit of hits) {
+      if (hit.object.visible && !(hit.object instanceof THREE.Sprite)) {
+        point = hit.point.clone();
+        break;
+      }
+    }
+    if (point === null) {
+      return;
+    }
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.setLength(Math.max(offset.length() * DOUBLE_CLICK_ZOOM, NEAREST_DISTANCE * 2));
+    this.flyTo(point.clone().add(offset), point, 0.7);
   };
 
   /** Stops a camera glide when the user grabs the camera. */

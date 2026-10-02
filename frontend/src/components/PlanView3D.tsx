@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { MarketView, OrderDocument } from '../api/types';
 import { useFontsReady } from '../hooks/useFontsReady';
 import { useNow } from '../hooks/useNow';
+import { NavigationToolbar } from './NavigationToolbar';
 import { useTheme } from '../hooks/useTheme';
 import { PlanTreeScene } from '../three/planTreeScene';
 import type { LadderMode, PlanHighlight } from '../three/planTreeScene';
@@ -31,6 +32,7 @@ export function PlanView3D(props: PlanView3DProps) {
   const fontsReady = useFontsReady();
   const canvasReference = useRef<HTMLCanvasElement | null>(null);
   const sceneReference = useRef<PlanTreeScene | null>(null);
+  const getScene = useCallback(() => sceneReference.current, []);
   const [failure, setFailure] = useState('');
   const [ladderMode, setLadderMode] = useState<LadderMode>('off');
   const secondTick = useNow(1000);
@@ -103,6 +105,7 @@ export function PlanView3D(props: PlanView3DProps) {
   return (
     <div className="scene-wrapper">
       <canvas ref={canvasReference} className="plan-canvas" />
+      <NavigationToolbar getScene={getScene} />
       {bookShown && (
         <div className="scene-toolbar" role="group" aria-label="Order book placement">
           <span className="muted">Order book</span>

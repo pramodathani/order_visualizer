@@ -24,3 +24,27 @@ The constructor calls the private `styleForTheme`, never the public `applyTheme`
 `PlanView3D` and `DayView3D` call `resize()` with the canvas's size as soon as the scene is created. Without that, the first fit ran while the camera still had its default square shape, so a wide scene was fitted to a square and then shown small in the middle of a wide canvas.
 
 All clean-up code checks for `THREE.Line`, which covers line segments and line loops as well as plain lines, so minor ticks and the ladder's rounded border are freed too.
+
+## Moving around the arena
+
+The user asked on 2026-10-02 to be able to drag, rotate and zoom into specific areas.
+
+| Control | How |
+|---|---|
+| Scroll zooms towards the cursor | `controls.zoomToCursor = true` |
+| Panning slides along the ground, not the screen | `controls.screenSpacePanning = false` |
+| A plain left-drag rotates or pans | `setDragMode()` swaps the mouse buttons (and one-finger touch); Shift-drag and right-drag always do the other |
+| Turn, zoom and fit buttons | `turnView()`, `zoomView()` and `fitView()` glide with `flyTo()`; Fit returns to the view saved by `setHome()` when the scene last fitted itself |
+| Double-click zooms into a spot | Raycasts into `focusRoots()`, skipping labels, and glides to 45% of the current distance around the point hit; empty floor counts as a spot |
+
+`minDistance` is 3 units, so zooming in never passes through what is being looked at.
+
+The double-click handler refreshes the camera's and scene's world matrices before aiming. They are normally refreshed by drawing, but a hidden browser tab draws no frames, and testing in a hidden automation tab showed the ray then starting from a stale camera matrix. A hidden tab also pauses every glide, because `requestAnimationFrame` does not fire there.
+
+## The sky follows the time on screen
+
+When the sky is on, a few times a second the base asks the scene for `focusTime()`, the time at the point the camera looks at (`controls.target`), read back from its depth along the time axis. The user asked for the sun to follow "the time on the screen in the scene", not the wall clock. When that time has moved more than 20 seconds, the sun, the lighting, the fog and the readout are updated. Reflections are regenerated from a separate small sky without its sun disc, only when the sun has moved more than 2°, because regenerating them costs a few milliseconds.
+
+The shadow-casting light shines from the sun while it is more than 3° up, so shadows fall away from the sun; at night it returns to a fixed overhead direction.
+
+`maxPolarAngle` keeps the camera just above the horizon. Without it the camera could be dragged under the ground and look up through it.

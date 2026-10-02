@@ -81,6 +81,37 @@ export class TimeScale {
   }
 
   /**
+   * Finds the moment at a depth, the reverse of depthOf.
+   * @param depth A depth, where 0 is the day's first order and further away is more negative.
+   * @returns The epoch time; inside a break, a moment inside that gap; before the first or after the last stretch, that stretch's start or end.
+   */
+  timeAt(depth: number): number {
+    const distance = -depth;
+    if (this.stretches.length === 0) {
+      return 0;
+    }
+    if (distance <= 0) {
+      return this.stretches[0].start;
+    }
+    for (let index = 0; index < this.stretches.length; index += 1) {
+      const stretch = this.stretches[index];
+      const stretchEnd = stretch.depthStart + (stretch.end - stretch.start) / this.secondsPerUnit;
+      if (distance < stretch.depthStart) {
+        const previous = this.stretches[index - 1];
+        if (previous === undefined) {
+          return stretch.start;
+        }
+        const share = (distance - (stretch.depthStart - this.breakDepth)) / this.breakDepth;
+        return previous.end + share * (stretch.start - previous.end);
+      }
+      if (distance <= stretchEnd) {
+        return stretch.start + (distance - stretch.depthStart) * this.secondsPerUnit;
+      }
+    }
+    return this.stretches[this.stretches.length - 1].end;
+  }
+
+  /**
    * Lists the breaks between busy stretches.
    * @returns For each break, the depth where it starts and the length of the gap it stands for, in seconds.
    */

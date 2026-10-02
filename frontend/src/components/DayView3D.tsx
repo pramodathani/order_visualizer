@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { OverviewOrder } from '../api/types';
 import { useFontsReady } from '../hooks/useFontsReady';
 import { useTheme } from '../hooks/useTheme';
 import { DayScene } from '../three/dayScene';
+import { NavigationToolbar } from './NavigationToolbar';
 import type { SkylineCell } from '../three/dayScene';
 import { Formatter } from '../utilities/formatter';
 import { StateColours } from '../utilities/stateColours';
@@ -36,6 +37,7 @@ export function DayView3D(props: DayView3DProps) {
   const wrapperReference = useRef<HTMLDivElement | null>(null);
   const canvasReference = useRef<HTMLCanvasElement | null>(null);
   const sceneReference = useRef<DayScene | null>(null);
+  const getScene = useCallback(() => sceneReference.current, []);
   const pickReference = useRef(onPickCell);
   const [hovered, setHovered] = useState<Hovered | null>(null);
   const [failure, setFailure] = useState('');
@@ -110,6 +112,7 @@ export function DayView3D(props: DayView3DProps) {
   return (
     <div className="day-canvas-wrapper" ref={wrapperReference}>
       <canvas ref={canvasReference} className="plan-canvas day-canvas" />
+      <NavigationToolbar getScene={getScene} />
       {hovered !== null && <HoverCard hovered={hovered} />}
     </div>
   );

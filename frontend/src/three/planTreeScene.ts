@@ -109,6 +109,8 @@ export class PlanTreeScene extends SceneController {
   private lastNow = 0;
   private highlight: PlanHighlight | null = null;
   private market: MarketView | null = null;
+  private timeStart = 0;
+  private timeSpan = 1;
   private legPositions = new Map<string, THREE.Vector3>();
   private readonly ladderRoot = new THREE.Group();
   private readonly ladderContent = new THREE.Group();
@@ -207,6 +209,8 @@ export class PlanTreeScene extends SceneController {
     const endTime = order.finished && order.updated_at !== null ? order.updated_at : Math.max(now, order.updated_at ?? now);
     const span = Math.max(endTime - startTime, 1);
     const depthOf = (time: number): number => -((time - startTime) / span) * TIME_DEPTH;
+    this.timeStart = startTime;
+    this.timeSpan = span;
 
     const nodes = this.layout.build(order);
     const positions = new Map<string, THREE.Vector3>();
@@ -240,6 +244,7 @@ export class PlanTreeScene extends SceneController {
     }
 
     const floorHeight = -deepest * LEVEL_SPACING - 3;
+    this.setGroundHeight(floorHeight);
     const market = this.market;
     if (market !== null && market.available && market.snapshot !== null && market.parent_order_id === order.parent_order_id) {
       const ladderDepth = Math.min(0, Math.max(-TIME_DEPTH, depthOf(market.snapshot.time)));
@@ -269,6 +274,7 @@ export class PlanTreeScene extends SceneController {
       const firstFit = this.fittedOrderId === null;
       this.fittedOrderId = order.parent_order_id;
       const view = this.framing(bounds, new THREE.Vector3(0.45, 0.38, 0.8), 1);
+      this.setHome(view.position, view.target);
       this.flyTo(view.position, view.target, firstFit ? 0 : 0.9);
     }
   }
@@ -299,6 +305,29 @@ export class PlanTreeScene extends SceneController {
       halo.scale.setScalar(pulse);
       (halo.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.25 * Math.sin(elapsedSeconds * 3);
     }
+  }
+
+  /**
+   * The time at the point the camera looks at, read from its depth along the order's time axis.
+   * @returns The epoch time, kept within the order's life, or null before any order is drawn.
+   */
+  protected focusTime(): number | null {
+    if (this.lastOrder === null) {
+      return null;
+    }
+    const share = Math.min(1, Math.max(0, -this.controls.target.z / TIME_DEPTH));
+    return this.timeStart + share * this.timeSpan;
+  }
+
+  /**
+   * The order, its floor and the order book, which a double-click can zoom into.
+   * @returns The objects to test.
+   */
+  protected focusRoots(): THREE.Object3D[] {
+    return [
+      this.orderGroup,
+      this.ladderRoot,
+    ];
   }
 
   /** Frees the drawn order and the order book's handle. */

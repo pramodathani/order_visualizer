@@ -65,6 +65,7 @@ export class DayScene extends SceneController {
   private hoveredKey: string | null = null;
   private lastDay: string | null = null;
   private lastOrders: OverviewOrder[] = [];
+  private timeScale: TimeScale | null = null;
   private columnBoxes = new Map<string, THREE.Box3>();
   private selection: THREE.LineSegments | null = null;
   private selectedKey: string | null = null;
@@ -115,6 +116,8 @@ export class DayScene extends SceneController {
       largestCount = Math.max(largestCount, cell.orders.length);
     }
     const timeScale = new TimeScale(bucketLives, GAP_LIMIT_SECONDS, SECONDS_PER_UNIT, BREAK_DEPTH);
+    this.timeScale = timeScale;
+    this.setGroundHeight(-0.03);
     const heightPerOrder = Math.min(1, TALLEST_COLUMN / largestCount);
 
     this.addColumns(cells, across, timeScale, heightPerOrder);
@@ -142,6 +145,7 @@ export class DayScene extends SceneController {
       this.selectedKey = null;
       this.drawSelection();
       const view = this.framing(bounds, new THREE.Vector3(0.3, 0.7, 0.65), 1);
+      this.setHome(view.position, view.target);
       this.flyTo(view.position, view.target, firstFit ? 0 : 1);
     }
   }
@@ -193,6 +197,27 @@ export class DayScene extends SceneController {
     if (this.selection !== null) {
       (this.selection.material as THREE.LineBasicMaterial).opacity = 0.65 + 0.35 * Math.sin(elapsedSeconds * 4);
     }
+  }
+
+  /**
+   * The time at the point the camera looks at, read from its depth along the day's broken time axis.
+   * @returns The epoch time, or null before any day is drawn.
+   */
+  protected focusTime(): number | null {
+    if (this.timeScale === null || this.lastOrders.length === 0) {
+      return null;
+    }
+    return this.timeScale.timeAt(this.controls.target.z);
+  }
+
+  /**
+   * The skyline and its floor, which a double-click can zoom into.
+   * @returns The objects to test.
+   */
+  protected focusRoots(): THREE.Object3D[] {
+    return [
+      this.dayGroup,
+    ];
   }
 
   /** Frees the drawn day and the pointer listeners. */
