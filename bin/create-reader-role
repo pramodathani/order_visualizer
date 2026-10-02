@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+ubi_directory="${ORDER_VISUALIZER_UNIFIED_BROKER_INTERFACE_DIRECTORY:-/home/pramod/Projects/unified_broker_interface}"
+admin_username="$(grep -E '^UNIFIED_BROKER_INTERFACE_POSTGRES_USERNAME=' "$ubi_directory/.env" | cut -d= -f2- | tr -d "'\"")"
+admin_password="$(grep -E '^UNIFIED_BROKER_INTERFACE_POSTGRES_PASSWORD=' "$ubi_directory/.env" | cut -d= -f2- | tr -d "'\"")"
+database_name="$(grep -E '^UNIFIED_BROKER_INTERFACE_POSTGRES_DB=' "$ubi_directory/.env" | cut -d= -f2- | tr -d "'\"")"
+reader_password="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+docker exec -i \
+    -e PGPASSWORD="$admin_password" \
+    unified_broker_interface-timescaledb-1 \
+    psql -v ON_ERROR_STOP=1 \
+    -v reader_password="$reader_password" \
+    -v database_name="$database_name" \
+    -U "$admin_username" -d "$database_name" \
+    < sql/create_reader_role.sql
+touch .env
+chmod 600 .env
+grep -v '^ORDER_VISUALIZER_DATABASE_PASSWORD=' .env > .env.new || true
+echo "ORDER_VISUALIZER_DATABASE_PASSWORD='$reader_password'" >> .env.new
+mv .env.new .env
+echo "Created role order_visualizer_reader and wrote its password to .env."
