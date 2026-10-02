@@ -1,29 +1,27 @@
 import { StateColours } from '../utilities/stateColours';
 
 /**
- * The key under the 3D view saying what each colour means.
+ * The key under the 3D view saying what each colour means in the current theme.
  * @returns The legend.
  */
 export function StateLegend() {
-  const legEntries = Object.entries(StateColours.LEG);
-  const partEntries = Object.entries(StateColours.PART);
   return (
     <div className="legend">
       <span className="legend-title">Legs</span>
-      {legEntries.map(([state, colour]) => (
+      {StateColours.LEG_STATES.map((state) => (
         <span key={`leg-${state}`} className="legend-entry">
-          <span className="swatch" style={{ background: colour }} />
+          <span className="swatch" style={{ background: StateColours.leg(state) }} />
           {state === 'acknowledged' ? 'resting' : state}
         </span>
       ))}
       <span className="legend-title">Parts</span>
-      {partEntries.map(([state, colour]) => (
+      {StateColours.PART_STATES.map((state) => (
         <span key={`part-${state}`} className="legend-entry">
-          <span className="swatch swatch-round" style={{ background: colour }} />
+          <span className="swatch swatch-round" style={{ background: StateColours.part(state, null) }} />
           {state}
         </span>
       ))}
-      <span className="legend-entry muted">ring = cancel requested · time runs away from you</span>
+      <span className="legend-entry muted">ring = cancel requested · particles = resting at the broker · time runs away from you</span>
     </div>
   );
 }

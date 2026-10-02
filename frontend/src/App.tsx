@@ -2,11 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from './api/apiClient';
 import type { OrderList } from './api/types';
+import { ChatBox } from './components/ChatBox';
+import { ThemePicker } from './components/ThemePicker';
 import { useEventStream } from './hooks/useEventStream';
 import { useNow } from './hooks/useNow';
+import { DayPage } from './pages/DayPage';
 import { LoginPage } from './pages/LoginPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { Formatter } from './utilities/formatter';
+import { useViewBridge, viewBridge } from './utilities/viewBridge';
 
 type SessionState = 'checking' | 'logged-out' | 'logged-in';
 
@@ -50,6 +54,21 @@ interface ViewerProps {
 function Viewer(props: ViewerProps) {
   const { onLoggedOut } = props;
   const { document: orderList, connected } = useEventStream<OrderList>('/api/events', 'orders', onLoggedOut);
+  const { view } = useViewBridge();
+
+  const showDay = () => {
+    window.history.replaceState(null, '', '#day');
+    viewBridge.showView('day');
+  };
+
+  const showOrders = () => {
+    window.history.replaceState(null, '', window.location.pathname);
+    viewBridge.showView('order');
+  };
+
+  const openOrder = useCallback((parentOrderId: string) => {
+    viewBridge.showOrder(parentOrderId);
+  }, []);
 
   const logOut = async () => {
     try {
@@ -64,16 +83,24 @@ function Viewer(props: ViewerProps) {
       <header className="header">
         <h1>Order visualizer</h1>
         <span className="read-only-badge">read-only</span>
+        <nav className="view-switch" aria-label="Views">
+          <button type="button" className={view === 'order' ? 'view-button view-button-active' : 'view-button'} onClick={showOrders}>
+            One order
+          </button>
+          <button type="button" className={view === 'day' ? 'view-button view-button-active' : 'view-button'} onClick={showDay}>
+            Whole day
+          </button>
+        </nav>
         <ConnectionState orderList={orderList} connected={connected} />
+        <ThemePicker />
         <button type="button" className="button button-quiet log-out" onClick={logOut}>
           Log out
         </button>
       </header>
-      {orderList === null ? (
-        <p className="empty centered">Waiting for the first read of the event table…</p>
-      ) : (
-        <OrdersPage orderList={orderList} onLoggedOut={onLoggedOut} />
-      )}
+      {view === 'day' && <DayPage onLoggedOut={onLoggedOut} onOpenOrder={openOrder} />}
+      {view === 'order' && orderList === null && <p className="empty centered">Waiting for the first read of the event table…</p>}
+      {view === 'order' && orderList !== null && <OrdersPage orderList={orderList} onLoggedOut={onLoggedOut} />}
+      <ChatBox />
     </div>
   );
 }

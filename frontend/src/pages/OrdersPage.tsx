@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { OrderDocument, OrderList as OrderListDocument, OrderSummary } from '../api/types';
+import type { MarketMoment, MarketView, OrderDocument, OrderList as OrderListDocument, OrderSummary } from '../api/types';
+import { MarketPanel } from '../components/MarketPanel';
 import { OrderDetails } from '../components/OrderDetails';
 import { OrderList } from '../components/OrderList';
 import { PlanView3D } from '../components/PlanView3D';
@@ -8,6 +9,7 @@ import { StateLegend } from '../components/StateLegend';
 import { useEventStream } from '../hooks/useEventStream';
 import { Formatter } from '../utilities/formatter';
 import { StateColours } from '../utilities/stateColours';
+import { useViewBridge, viewBridge } from '../utilities/viewBridge';
 
 const HASH_PREFIX = '#order=';
 
@@ -68,12 +70,41 @@ export function OrdersPage(props: OrdersPageProps) {
   }, []);
 
   const select = (parentOrderId: string) => {
+    viewBridge.setHighlight(null);
     window.location.hash = `${HASH_PREFIX}${parentOrderId}`;
     setSelectedId(parentOrderId);
   };
+  const bridge = useViewBridge();
 
   const orderUrl = selectedId === null ? null : `/api/orders/${encodeURIComponent(selectedId)}/events`;
   const { document: order } = useEventStream<OrderDocument>(orderUrl, 'order', onLoggedOut);
+  const [chosenMoment, setChosenMoment] = useState<MarketMoment | null>(null);
+  const orderFinished = order?.finished ?? true;
+  let moment: MarketMoment = orderFinished ? 'placed' : 'now';
+  if (chosenMoment !== null && (chosenMoment !== 'now' || !orderFinished) && (chosenMoment !== 'ended' || orderFinished)) {
+    moment = chosenMoment;
+  }
+  const marketUrl = selectedId === null ? null : `/api/orders/${encodeURIComponent(selectedId)}/market/events?moment=${moment}`;
+  const { document: market } = useEventStream<MarketView>(marketUrl, 'market', onLoggedOut);
+
+  useEffect(() => {
+    if (bridge.marketMomentRequest === 0) {
+      setChosenMoment(null);
+    }
+  }, [selectedId, bridge.marketMomentRequest]);
+
+  useEffect(() => {
+    if (bridge.marketMoment !== null) {
+      setChosenMoment(bridge.marketMoment);
+    }
+  }, [bridge.marketMoment, bridge.marketMomentRequest]);
+
+  useEffect(() => {
+    viewBridge.report({
+      parentOrderId: selectedId,
+      marketMoment: moment,
+    });
+  }, [selectedId, moment]);
 
   return (
     <div className="orders-page">
@@ -107,8 +138,9 @@ export function OrdersPage(props: OrdersPageProps) {
                   : ''}
               </span>
             </div>
-            <PlanView3D order={order} />
+            <PlanView3D order={order} highlight={bridge.highlight} market={market} />
             <StateLegend />
+            <MarketPanel order={order} market={market} moment={moment} onMomentChange={setChosenMoment} />
             <OrderDetails order={order} />
           </>
         )}

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import type { OrderSummary } from '../api/types';
 import { Formatter } from '../utilities/formatter';
 import { StateColours } from '../utilities/stateColours';
@@ -16,11 +18,20 @@ interface OrderListProps {
  */
 export function OrderList(props: OrderListProps) {
   const { orders, selectedId, onSelect } = props;
+  const listReference = useRef<HTMLUListElement | null>(null);
+
+  useEffect(() => {
+    const selected = listReference.current?.querySelector('.order-row-selected');
+    selected?.scrollIntoView({
+      block: 'nearest',
+    });
+  }, [selectedId, orders.length]);
+
   if (orders.length === 0) {
     return <p className="empty">No orders match.</p>;
   }
   return (
-    <ul className="order-list">
+    <ul className="order-list" ref={listReference}>
       {orders.map((order) => {
         const selected = order.parent_order_id === selectedId;
         return (

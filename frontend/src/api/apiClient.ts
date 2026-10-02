@@ -1,3 +1,5 @@
+import type { ChatAnswer } from './types';
+
 const REQUESTED_WITH_HEADER = 'X-Requested-With';
 const REQUESTED_WITH_VALUE = 'order-visualizer';
 
@@ -60,6 +62,42 @@ export class ApiClient {
       },
     });
     await this.readJson(response);
+  }
+
+  /**
+   * Asks whether the chat is switched on.
+   * @returns Whether it is, and why not when it is not.
+   */
+  async chatStatus(): Promise<{ enabled: boolean; reason: string | null }> {
+    const response = await fetch('/api/chat/status', {
+      credentials: 'same-origin',
+    });
+    return (await this.readJson(response)) as unknown as { enabled: boolean; reason: string | null };
+  }
+
+  /**
+   * Asks the chat a question.
+   * @param conversationId The conversation to continue, or null to start one.
+   * @param message The question.
+   * @param view What the page shows now.
+   * @returns The answer, its view commands and the conversation id.
+   * @throws ApiError when the chat is switched off or Anthropic's API failed.
+   */
+  async chat(conversationId: string | null, message: string, view: Record<string, unknown>): Promise<ChatAnswer> {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        [REQUESTED_WITH_HEADER]: REQUESTED_WITH_VALUE,
+      },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message,
+        view,
+      }),
+    });
+    return (await this.readJson(response)) as unknown as ChatAnswer;
   }
 
   /**
