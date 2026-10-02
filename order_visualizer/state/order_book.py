@@ -72,6 +72,40 @@ class OrderBook:
         summaries.sort(key=self._received_at, reverse=True)
         return summaries
 
+    def overviews(self) -> list[dict[str, Any]]:
+        """Lists every order in the short form the whole-day view uses, oldest first.
+
+        Returns:
+            list[dict[str, Any]]: One overview per parent order.
+        """
+        with self._lock:
+            parents = list(self._parents.values())
+            overviews = []
+            for parent in parents:
+                overviews.append(parent.to_overview())
+        overviews.sort(key=self._received_at)
+        return overviews
+
+    def outcome_counts(self, synthetic_type: str | None, instrument_id: str | None) -> dict[str, int]:
+        """Counts how finished orders of one type ended.
+
+        Args:
+            synthetic_type (str | None): The order type to count.
+            instrument_id (str | None): Only orders on this instrument, or None for every instrument.
+
+        Returns:
+            dict[str, int]: The number of finished orders in each final state.
+        """
+        counts = {}
+        with self._lock:
+            for parent in self._parents.values():
+                if parent.synthetic_type != synthetic_type or not parent.is_finished():
+                    continue
+                if instrument_id is not None and parent.instrument_id != instrument_id:
+                    continue
+                counts[parent.state] = counts.get(parent.state, 0) + 1
+        return counts
+
     def document(self, parent_order_id: str) -> dict[str, Any] | None:
         """Describes one whole order.
 

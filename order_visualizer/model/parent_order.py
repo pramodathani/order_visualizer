@@ -46,6 +46,7 @@ class ParentOrder:
         legs: The legs by leg id, in the order they were first seen.
         parts: The plan parts by path, in the order they were first seen.
         timeline: Each event in a short form, oldest first.
+        state_history: Each change of the parent's state as a (time, state) pair, oldest first.
     """
 
     def __init__(self, parent_order_id: str):
@@ -70,6 +71,7 @@ class ParentOrder:
         self.legs = {}
         self.parts = {}
         self.timeline = []
+        self.state_history = []
 
     def apply(self, event: OrderEvent) -> None:
         """Folds one event into the order.
@@ -85,8 +87,14 @@ class ParentOrder:
         self.version += 1
         if event.synthetic_type is not None:
             self.synthetic_type = event.synthetic_type
-        if event.parent_state is not None:
+        if event.parent_state is not None and event.parent_state != self.state:
             self.state = event.parent_state
+            self.state_history.append(
+                (
+                    event.time,
+                    event.parent_state,
+                ),
+            )
         if event.event == 'parent_received':
             self._take_request(event)
         self._take_parameters(event)
@@ -137,6 +145,34 @@ class ParentOrder:
             'version': self.version,
             'leg_count': len(self.legs),
             'part_count': len(self.parts),
+        }
+
+    def to_overview(self) -> dict[str, Any]:
+        """Describes the order in the short form used by the whole-day view.
+
+        Returns:
+            dict[str, Any]: The order's id, type, side, state, times, leg count and state history as a list of {"time", "state"} objects.
+        """
+        history = []
+        for time, state in self.state_history:
+            history.append(
+                {
+                    'time': time,
+                    'state': state,
+                },
+            )
+        return {
+            'parent_order_id': self.parent_order_id,
+            'synthetic_type': self.synthetic_type,
+            'state': self.state,
+            'finished': self.is_finished(),
+            'transaction_type': self.transaction_type,
+            'quantity': self.quantity,
+            'price': self.price,
+            'received_at': self.received_at,
+            'updated_at': self.updated_at,
+            'leg_count': len(self.legs),
+            'state_history': history,
         }
 
     def to_document(self) -> dict[str, Any]:

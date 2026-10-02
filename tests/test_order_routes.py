@@ -44,6 +44,7 @@ class TestOrderRoutes:
         """Without a session the order routes answer 401."""
         client = self._client()
         assert client.get('/api/orders').status_code == 401
+        assert client.get('/api/overview').status_code == 401
         assert client.get(f'/api/orders/{PARENT_ID}').status_code == 401
 
     def test_orders_after_login(self):
@@ -58,6 +59,8 @@ class TestOrderRoutes:
         ]
         document = client.get(f'/api/orders/{PARENT_ID}').json()
         assert len(document['legs']) == 2
+        overview = client.get('/api/overview').json()
+        assert overview['orders'][0]['state'] == 'cancelled'
 
     def test_order_rejects_a_bad_or_unknown_id(self):
         """An id that is not a UUID is refused, and an unknown one is not found."""
@@ -65,6 +68,15 @@ class TestOrderRoutes:
         client.post('/api/auth/login', json={'password': PASSWORD}, headers=HEADERS)
         assert client.get('/api/orders/not-an-id').status_code == 400
         assert client.get('/api/orders/00000000-0000-0000-0000-000000000000').status_code == 404
+
+    def test_chat_is_switched_off_without_a_key(self):
+        """Without an API key the chat says how to switch it on."""
+        client = self._client()
+        client.post('/api/auth/login', json={'password': PASSWORD}, headers=HEADERS)
+        assert client.get('/api/chat/status').json()['enabled'] is False
+        response = client.post('/api/chat', json={'message': 'hello'}, headers=HEADERS)
+        assert response.status_code == 503
+        assert 'ORDER_VISUALIZER_ANTHROPIC_API_KEY' in response.json()['detail']
 
     def test_there_is_no_route_that_writes_orders(self):
         """Every order route answers only GET."""

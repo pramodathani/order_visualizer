@@ -96,6 +96,28 @@ class TestOrderBook:
         ]
         assert summaries[0]['finished'] is False
 
+    def test_overviews_carry_the_parent_state_history(self):
+        """The whole-day view gets each change of the parent's state, without repeats."""
+        book = OrderBook()
+        book.apply(EventFactory().plan_rows())
+        overviews = book.overviews()
+        assert len(overviews) == 1
+        assert overviews[0]['leg_count'] == 2
+        assert overviews[0]['state_history'] == [
+            {
+                'time': 1_000_001.0,
+                'state': 'received',
+            },
+            {
+                'time': 1_000_005.0,
+                'state': 'working',
+            },
+            {
+                'time': 1_000_011.0,
+                'state': 'cancelled',
+            },
+        ]
+
     def test_document_of_an_unknown_order_is_none(self):
         """An order the book never saw has no document and no version."""
         book = OrderBook()

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
         poll_interval_seconds: How often the viewer asks the event table for new rows.
         lookback_hours: How many hours of orders are loaded when the viewer starts.
         frontend_directory: The directory holding the built React application.
+        anthropic_api_key: The Anthropic API key the chat uses, or empty to leave the chat switched off.
+        chat_model: The Claude model the chat uses.
     """
 
     model_config = SettingsConfigDict(
@@ -47,8 +49,10 @@ class Settings(BaseSettings):
     database_username: str = 'order_visualizer_reader'
     database_password: str = ''
     poll_interval_seconds: float = 2.0
-    lookback_hours: float = 72.0
+    lookback_hours: float = 168.0
     frontend_directory: Path = Path('frontend/dist')
+    anthropic_api_key: str = ''
+    chat_model: str = 'claude-opus-5-5'
 
     def require_security_values(self) -> None:
         """Checks that the password hash, session secret and database password are set.

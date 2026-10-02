@@ -10,19 +10,26 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 
+import anthropic
 import fastapi
 import starlette.middleware.sessions
 import uvicorn
 
+from order_visualizer.chat.chat_assistant import ChatAssistant
+from order_visualizer.chat.chat_session import ChatSessions
+from order_visualizer.chat.chat_toolbox import ChatToolbox
 from order_visualizer.configuration.database_address import DatabaseAddress
 from order_visualizer.configuration.settings import Settings
 from order_visualizer.routes.auth_routes import AuthRoutes
+from order_visualizer.routes.chat_routes import ChatRoutes
 from order_visualizer.routes.frontend_routes import FrontendRoutes
 from order_visualizer.routes.order_routes import OrderRoutes
 from order_visualizer.security.authenticator import Authenticator
 from order_visualizer.security.session_guard import SessionGuard
+from order_visualizer.sources.depth_reader import DepthReader
 from order_visualizer.sources.event_reader import EventReader
 from order_visualizer.state.event_follower import EventFollower
+from order_visualizer.state.market_service import MarketService
 from order_visualizer.state.order_book import OrderBook
 from order_visualizer.utilities.clock import SystemClock
 
@@ -91,10 +98,20 @@ class Application:
             self.settings.poll_interval_seconds,
             self.settings.lookback_hours,
         )
+        depth_reader = DepthReader(address, self.settings.database_username, self.settings.database_password)
+        market_service = MarketService(depth_reader, self.book, self.clock)
+        assistant = None
+        if self.settings.anthropic_api_key:
+            client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key, timeout=180.0)
+            assistant = ChatAssistant(client, ChatToolbox(self.book, market_service), self.settings.chat_model)
+        else:
+            _LOGGER.info('The chat is switched off because ORDER_VISUALIZER_ANTHROPIC_API_KEY is empty.')
         return self.create_web_application(
             authenticator=Authenticator(self.settings.password_hash, self.clock),
             follower=self.follower,
             with_lifespan=True,
+            market_service=market_service,
+            assistant=assistant,
         )
 
     def create_web_application(
@@ -102,6 +119,8 @@ class Application:
         authenticator: Authenticator,
         follower: EventFollower,
         with_lifespan: bool,
+        market_service: MarketService | None = None,
+        assistant: ChatAssistant | None = None,
     ) -> fastapi.FastAPI:
         """Assembles the FastAPI application from ready components.
 
@@ -111,6 +130,8 @@ class Application:
             authenticator (Authenticator): Checks the password.
             follower (EventFollower): Reads new rows and reports its status.
             with_lifespan (bool): Whether startup should start the follower's loop.
+            market_service (MarketService | None): Builds the market panel, or None to leave its routes out.
+            assistant (ChatAssistant | None): Answers chat questions, or None to keep the chat switched off.
 
         Returns:
             fastapi.FastAPI: The web application.
@@ -135,7 +156,8 @@ class Application:
         )
         guard = SessionGuard()
         web_application.include_router(AuthRoutes(authenticator, guard, self.clock).router)
-        web_application.include_router(OrderRoutes(self.book, follower, guard, self.clock).router)
+        web_application.include_router(OrderRoutes(self.book, follower, guard, self.clock, market_service).router)
+        web_application.include_router(ChatRoutes(assistant, ChatSessions(), guard).router)
         web_application.include_router(FrontendRoutes(self.settings.frontend_directory).router)
         return web_application
 

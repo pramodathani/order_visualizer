@@ -12,4 +12,4 @@ When a query returns a full batch of 5,000 rows, the next query starts exactly a
 
 ## Lookback
 
-The first poll reads `lookback_hours` (72 by default) so that the order list has recent history on start. On 2026-10-02 the whole table held 10,473 rows from 1,710 orders over a week, so a full lookback is a few thousand rows.
+The first poll reads `lookback_hours` (168, or 7 days, by default) so that the order list has recent history on start. On 2026-10-02 the whole table held 10,473 rows from 1,710 orders over a week, so a full lookback is a few thousand rows.
