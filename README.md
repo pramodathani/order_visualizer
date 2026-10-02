@@ -17,6 +17,26 @@ Twelve editor themes are available (One Dark by default, Dracula, Monokai, Nord,
 
 The order book readings are estimates from five levels of depth and recent trading speed. They assume prices hold still, and the page says so; they are not predictions.
 
+## Moving around, and the world around the arena
+
+Each 3D view has a toolbar in its bottom-left corner for moving around the arena.
+
+| Control | What it does |
+|---|---|
+| Scroll | Zooms towards whatever is under the cursor |
+| Double-click | Glides the camera in on the spot clicked: a tube, a column, the order book or the ground |
+| Drag | Turns the view, or in **Pan** mode slides the arena along the ground; Shift-drag or right-drag does the other |
+| ⟲ ⟳ + − Fit | Turn 30°, zoom in or out, or glide back to the whole scene |
+| Sky | Shows or hides the sky and the landscape below |
+
+With the sky on, the arena stands in a landscape:
+
+- **Sky and sun.** A physically based sky with drifting clouds. The sun stands where it was in Mumbai at the time the camera is looking at along the scene's time axis, so it moves as you pan through a day, and a readout under the toolbar says the time and where the sun is. The light, shadows, fog and reflections follow it, warm at sunrise and sunset and dim at night.
+- **Land.** Rolling grass with mud patches, the arena in a worn clearing, about 900 pines, broadleaf trees and birches beyond it, and two ranges of mountains on the horizon with snow on the highest peaks.
+- **Animals.** Dogs trot and sprint around the meadow, and squirrels dart between the trees.
+
+Everything is generated from a seed, so the same land appears every time, and the animals stay out of the arena so they never hide the order being read.
+
 ## How it stays out of the order engine's way
 
 ```
@@ -79,7 +99,7 @@ UBI order engine ──writes──► TimescaleDB unified.synthetic_order_event
    systemctl --user enable --now order-visualizer
    ```
 
-The viewer listens on port 8105.
+The viewer listens on port 8105 on every network interface, so other devices on the same network can open it at `http://<this machine's address>:8105`. If a firewall such as `ufw` is active, allow the local network in, for example with `sudo ufw allow from 192.168.1.0/24 to any port 8105 proto tcp`. Everyone who can reach the page sees the login, so the viewer password is what protects the data.
 
 ## Settings
 
